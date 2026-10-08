@@ -11,11 +11,13 @@ Aplicação desenvolvida para o trabalho individual de **Projeto de Banco de Dad
 - **Professor:** Anderson
 - **Entrega prevista no enunciado:** 07/10/2026
 - **Repositório:** [EmanuelCandido/Estoque-de-vendas](https://github.com/EmanuelCandido/Estoque-de-vendas).
-- **Vídeo explicativo:** [vídeo de apresentação](docs/videos/apresentacao.mp4).
+- **Vídeo explicativo:** [assistir à apresentação no YouTube](https://youtu.be/KqyOtL93yEo).
 
 ## Vídeo de apresentação
 
-[Abrir o vídeo no GitHub](https://github.com/EmanuelCandido/Estoque-de-vendas/blob/main/docs/videos/apresentacao.mp4) · [Baixar o vídeo em MP4](https://github.com/EmanuelCandido/Estoque-de-vendas/raw/refs/heads/main/docs/videos/apresentacao.mp4)
+[Assistir ao vídeo de apresentação no YouTube](https://youtu.be/KqyOtL93yEo)
+
+[Baixar a cópia em MP4](https://github.com/EmanuelCandido/Estoque-de-vendas/raw/refs/heads/main/docs/videos/apresentacao.mp4)
 
 Duração: **4 minutos e 1 segundo**. O arquivo também está disponível em `docs/videos/apresentacao.mp4` ao clonar o projeto.
 

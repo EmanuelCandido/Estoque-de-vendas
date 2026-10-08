@@ -16,7 +16,7 @@
 | Código organizado | `src/`, `database/`, `docs/`, `scripts/`, `tests/`. |
 | README com identificação e execução | `README.md`, disciplina Projeto de Banco de Dados, professor Anderson. |
 | Repositório no GitHub | [EmanuelCandido/Estoque-de-vendas](https://github.com/EmanuelCandido/Estoque-de-vendas). |
-| Vídeo explicativo | [Vídeo de apresentação](videos/apresentacao.mp4), também vinculado no README. |
+| Vídeo explicativo | [Vídeo de apresentação no YouTube](https://youtu.be/KqyOtL93yEo), também vinculado no README. |
 
 ## Conferência antes de entregar em 07/10/2026
 
@@ -33,4 +33,4 @@
 - [x] Acrescentar o link do vídeo ao README.
 - [ ] Enviar os links do repositório e do vídeo conforme orientação da disciplina.
 
-O vídeo gravado está disponível em `docs/videos/apresentacao.mp4`, com link no README. Confira os tópicos acima antes de enviar os links ao professor.
+O vídeo gravado está disponível no [YouTube](https://youtu.be/KqyOtL93yEo), com link no README e cópia em `docs/videos/apresentacao.mp4`. Confira os tópicos acima antes de enviar os links ao professor.

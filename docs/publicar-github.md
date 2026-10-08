@@ -31,7 +31,7 @@ Na aba **Actions** do GitHub, o workflow **Testes PostgreSQL** verifica a integr
 ## Finalizar a entrega
 
 1. Confirme que o repositório está público ou acessível ao professor.
-2. Confira o [vídeo de apresentação](videos/apresentacao.mp4), incluindo os códigos SQL e seu uso nas telas.
+2. Confira o [vídeo de apresentação no YouTube](https://youtu.be/KqyOtL93yEo), incluindo os códigos SQL e seu uso nas telas.
 3. Use o link do vídeo indicado no README.
 4. Envie os links do repositório e do vídeo conforme a orientação da disciplina.
 
