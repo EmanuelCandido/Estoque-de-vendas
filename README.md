@@ -11,7 +11,15 @@ Aplicação desenvolvida para o trabalho individual de **Projeto de Banco de Dad
 - **Professor:** Anderson
 - **Entrega prevista no enunciado:** 07/10/2026
 - **Repositório:** [EmanuelCandido/Estoque-de-vendas](https://github.com/EmanuelCandido/Estoque-de-vendas).
-- **Vídeo explicativo:** adicionar o link após a gravação.
+- **Vídeo explicativo:** [vídeo de apresentação](docs/videos/apresentacao.mp4).
+
+## Vídeo de apresentação
+
+[Abrir o vídeo no GitHub](https://github.com/EmanuelCandido/Estoque-de-vendas/blob/main/docs/videos/apresentacao.mp4) · [Baixar o vídeo em MP4](https://github.com/EmanuelCandido/Estoque-de-vendas/raw/refs/heads/main/docs/videos/apresentacao.mp4)
+
+Duração: **4 minutos e 1 segundo**. O arquivo também está disponível em `docs/videos/apresentacao.mp4` ao clonar o projeto.
+
+O enunciado pede a apresentação do objetivo, do problema e das funcionalidades; a demonstração das telas; a explicação dos códigos da View, Function e Procedure, com seus parâmetros, resultados e usos; e a demonstração do fluxo da tela até o banco e de volta à aplicação.
 
 ## Problema e funcionalidades
 
@@ -171,7 +179,7 @@ database/
   demonstracao.sql          consultas para apresentação
 scripts/                   inicialização do banco e PostgreSQL portátil
 tests/                     testes de integração
-docs/                      modelo, requisitos e execução
+docs/                      modelo, requisitos, execução e vídeo de apresentação
 ```
 
 ## Documentação e entrega
