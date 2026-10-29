@@ -15,11 +15,9 @@ Aplicação desenvolvida para o trabalho individual de **Projeto de Banco de Dad
 
 ## Vídeo de apresentação
 
-[Assistir ao vídeo de apresentação no YouTube](https://youtu.be/KqyOtL93yEo)
+https://github.com/user-attachments/assets/1415d223-fee3-49f3-ab49-a0857222f1cf
 
-[Baixar a cópia em MP4](https://github.com/EmanuelCandido/Estoque-de-vendas/raw/refs/heads/main/docs/videos/apresentacao.mp4)
-
-Duração: **4 minutos e 1 segundo**. O arquivo também está disponível em `docs/videos/apresentacao.mp4` ao clonar o projeto.
+Duração: **4 minutos e 1 segundo**. O vídeo também está no [YouTube](https://youtu.be/KqyOtL93yEo) e, em resolução original e com legendas, em [`docs/videos/apresentacao.mp4`](docs/videos/apresentacao.mp4).
 
 O enunciado pede a apresentação do objetivo, do problema e das funcionalidades; a demonstração das telas; a explicação dos códigos da View, Function e Procedure, com seus parâmetros, resultados e usos; e a demonstração do fluxo da tela até o banco e de volta à aplicação.
 
