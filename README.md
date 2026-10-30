@@ -23,6 +23,12 @@ Duração: **4 minutos e 1 segundo**. O vídeo também está no [YouTube](https:
 
 O enunciado pede a apresentação do objetivo, do problema e das funcionalidades; a demonstração das telas; a explicação dos códigos da View, Function e Procedure, com seus parâmetros, resultados e usos; e a demonstração do fluxo da tela até o banco e de volta à aplicação.
 
+## Vídeo da integração com Supabase e Redis
+
+https://github.com/user-attachments/assets/15bf4c6e-2a68-4b64-9433-bcc1cbb4a2d8
+
+Duração: **2 minutos e 41 segundos**. Mostra a proposta, as telas, a gravação e a leitura no Supabase, o teste do cache no Redis (MISS e HIT), a invalidação após uma venda e os benefícios. Em resolução original, o vídeo está em [`docs/videos/supabase-redis.mp4`](docs/videos/supabase-redis.mp4).
+
 ## Problema e funcionalidades
 
 Uma pequena loja precisa manter clientes, produtos e estoque organizados, calcular descontos corretamente e registrar uma venda sem deixar os dados inconsistentes.
