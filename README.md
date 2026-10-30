@@ -2,6 +2,8 @@
 
 Aplicação desenvolvida para o trabalho individual de **Projeto de Banco de Dados**. O objetivo é demonstrar modelagem de dados, operações CRUD e integração com View, Function e Procedure reais do PostgreSQL, usando vendas e estoque como exemplo prático.
 
+No **Trabalho Prático — Integração com Supabase e Redis**, o mesmo sistema evoluiu: os dados passaram a ficar no **Supabase** (PostgreSQL na nuvem) e o **Redis** foi adicionado como cache das leituras mais repetidas. Veja [Integração com Supabase e Redis](#integração-com-supabase-e-redis).
+
 ![Visão geral da aplicação](docs/images/visao-geral.jpg)
 
 ## Identificação
@@ -35,13 +37,15 @@ Funcionalidades disponíveis:
 - Registro de venda com vários itens e baixa automática no estoque.
 - Relatório de vendas com filtros de data e detalhamento dos itens.
 - Tela **Banco de dados**, com o código SQL e registros das chamadas reais à View, Function e Procedure, útil para a apresentação.
+- Tela **Supabase e Redis**, com o servidor e a latência do Supabase, as chaves guardadas no Redis com o tempo de expiração, acertos e faltas do cache, os comandos executados e um botão **Testar cache** que mede a mesma consulta vinda do Supabase e do Redis.
 
 ## Tecnologias
 
 - Python 3.10 ou superior; projeto validado com Python 3.12.
 - Flask para a API e a página web.
 - Psycopg 3 para conexão e consultas parametrizadas.
-- PostgreSQL 17, com SQL e PL/pgSQL.
+- PostgreSQL 17, com SQL e PL/pgSQL, hospedado no **Supabase**.
+- **Redis** 7, acessado com a biblioteca `redis-py`, como cache.
 - Waitress para servir a aplicação local.
 - HTML, CSS e JavaScript sem dependências de interface externas.
 - unittest para testes de integração em PostgreSQL real.
@@ -71,7 +75,55 @@ Com 100% de desconto, o total é R$ 0,00. A venda e seus itens são registrados,
 
 ![Orçamento com desconto de 100% e total de R$ 0,00](docs/images/orcamento-100.jpg)
 
+## Integração com Supabase e Redis
+
+**Vídeo demonstrativo:** [assistir no GitHub](https://github.com/EmanuelCandido/Estoque-de-vendas/blob/main/docs/videos/supabase-redis.mp4) · [baixar em MP4](https://github.com/EmanuelCandido/Estoque-de-vendas/raw/refs/heads/main/docs/videos/supabase-redis.mp4). Em 2 minutos e 41 segundos, mostra a proposta, as telas, a gravação e a leitura no Supabase, o teste do cache no Redis (MISS e HIT), a invalidação após uma venda e os benefícios. O arquivo também está em `docs/videos/supabase-redis.mp4`.
+
+### Supabase: onde os dados ficam
+
+O Supabase oferece um PostgreSQL gerenciado na nuvem. Como o projeto já era em PostgreSQL, a integração aproveita tudo o que existia: as tabelas, a View `vw_relatorio_vendas`, a Function `fn_calcular_total_venda` e a Procedure `sp_baixar_estoque` são criadas no banco do Supabase pelo próprio iniciador (`scripts/setup_db.py`).
+
+- **Comunicação:** o Flask conecta ao Supabase pela *connection string* do *Session pooler*, lida da variável `DATABASE_URL` no `.env` (`src/config.py` e `src/db.py`). Todas as consultas são parametrizadas.
+- **Funcionalidades que usam os dados:** CRUD de produtos e clientes, orçamento (Function), venda com baixa de estoque (Procedure, em uma única transação) e relatório (View). Os dados ficam disponíveis de qualquer computador e podem ser conferidos no **Table Editor** do painel do Supabase.
+- **Segurança:** o script `database/supabase/01_seguranca.sql` liga o Row Level Security nas tabelas e retira o acesso das roles `anon` e `authenticated`, fechando a API REST pública do Supabase, já que a aplicação acessa o banco pelo servidor. A senha fica apenas no `.env`, que não vai para o GitHub.
+- **Na interface:** a tela **Supabase e Redis** mostra o servidor (`*.pooler.supabase.com`), o banco, a versão, a latência e a quantidade de registros, e o topo da página indica *Supabase conectado*.
+
+### Redis: onde, como e por quê
+
+**Problema:** com o banco na nuvem, cada consulta atravessa a internet. As telas pedem as mesmas leituras o tempo todo: toda abertura do sistema e toda gravação recarregam produtos, clientes e o relatório de vendas, que agrega três tabelas pela View. Os dados mudam bem menos do que são lidos.
+
+**Onde foi usado:** em `src/cache.py`, aplicado às rotas `GET /api/produtos`, `GET /api/clientes` e `GET /api/relatorio` (cada filtro de data tem sua própria chave) em `src/app.py`.
+
+**Como funciona (cache-aside):**
+
+1. A rota procura a chave no Redis, por exemplo `estoque:cache:relatorio:-:-`.
+2. Se existe (**HIT**), devolve o JSON guardado, sem acessar o Supabase.
+3. Se não existe (**MISS**), consulta o Supabase e grava o resultado no Redis com expiração (`CACHE_TTL`, 60 segundos por padrão).
+4. Quando há uma escrita, a aplicação apaga as chaves afetadas (invalidação): uma venda apaga `produtos` e `relatorio`; um cadastro apaga a chave da sua lista. A próxima leitura já vem atualizada do banco.
+
+Acertos, faltas e invalidações ficam contados no próprio Redis (`estoque:stats`). Cada resposta informa a origem no cabeçalho `X-Cache` (`HIT` ou `MISS`) e o tempo no `X-Tempo-Ms`.
+
+**Benefícios:** respostas muito mais rápidas nas leituras repetidas (memória em vez de uma consulta pela internet), menos consultas e conexões no plano gratuito do Supabase e nenhum dado desatualizado após vendas, graças à invalidação. O TTL garante que até uma alteração feita fora do sistema, direto no painel do Supabase, apareça em no máximo 60 segundos.
+
+**Por que o Redis:** guarda tudo em memória, é muito rápido, oferece expiração automática por chave (`SET ... EX`) e é compartilhado entre processos e servidores, ao contrário de um dicionário na memória do Python. Se o Redis estiver fora do ar, a aplicação continua funcionando direto no Supabase.
+
+**Como demonstrar:** abra **Supabase e Redis** e clique em **Testar cache**. A aplicação limpa o cache e faz a mesma consulta duas vezes: a 1ª vem do Supabase (MISS) e a 2ª do Redis (HIT), com os tempos lado a lado. Depois, registre uma venda e volte à tela para ver o comando `DEL` e a nova consulta (MISS) trazendo o estoque atualizado.
+
+### Configurar Supabase e Redis
+
+1. Crie uma conta e um projeto gratuito em [supabase.com](https://supabase.com), de preferência na região São Paulo (`sa-east-1`), e anote a senha do banco.
+2. No projeto, clique em **Connect** e copie a URI do **Session pooler**.
+3. Para o Redis, use uma das opções:
+   - **Nuvem, sem instalar nada:** crie um banco gratuito no [Upstash](https://upstash.com) ou no Redis Cloud e copie a URL que começa com `rediss://`.
+   - **Docker:** `docker compose up -d redis` e use `redis://127.0.0.1:6379/0`.
+4. Copie `.env.example` para `.env` e preencha `DATABASE_URL` (com a senha no lugar de `[YOUR-PASSWORD]`) e `REDIS_URL`.
+5. Execute `iniciar.bat`. Com `DATABASE_URL` preenchida, o iniciador não usa o PostgreSQL portátil: cria as tabelas e os recursos no Supabase, insere os exemplos se o banco estiver vazio e abre a aplicação em `http://127.0.0.1:5000`.
+
+Sem `REDIS_URL`, o sistema funciona sem cache; sem `DATABASE_URL`, usa o PostgreSQL portátil local descrito abaixo.
+
 ## Execução rápida no Windows
+
+**Vídeo passo a passo:** [assistir no GitHub](https://github.com/EmanuelCandido/Estoque-de-vendas/blob/main/docs/videos/como-executar.mp4) · [baixar em MP4](https://github.com/EmanuelCandido/Estoque-de-vendas/raw/refs/heads/main/docs/videos/como-executar.mp4). Em 3 minutos e 49 segundos, mostra os pré-requisitos, o download do projeto, a execução do `iniciar.bat`, um teste rápido no navegador, os testes automatizados, como encerrar e o que fazer se algo der errado. O arquivo também está em `docs/videos/como-executar.mp4`.
 
 1. Instale Python 3.10 ou superior, com o comando `python` ou o iniciador `py` disponível no terminal.
 2. Dê dois cliques em **`iniciar.bat`** na pasta do projeto.
@@ -152,18 +204,20 @@ Os dados iniciais incluem 3 clientes, 6 produtos e 3 vendas, totalizando R$ 1.34
 Com o banco iniciado:
 
 ```powershell
+.\.venv\Scripts\python.exe -m pip install fakeredis
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 Os testes usam `TEST_DATABASE_URL`, `DATABASE_URL` ou a conexão do banco portátil, nessa ordem. Criam um schema temporário próprio e o removem ao terminar, preservando as tabelas da aplicação. O usuário de teste precisa ter permissão para criar schemas.
 
-São verificados cálculo da Function, descontos de 0% a 100%, venda com total zero, agregação da View, baixa de estoque pela Procedure, gravação da venda, rollback por falta de estoque, CRUD, validações diretamente no banco, atualização das restrições sem perda de dados, preservação de histórico, filtros e duas vendas concorrentes da última unidade. O workflow em `.github/workflows/testes.yml` executa os mesmos testes com PostgreSQL 17 no GitHub Actions após a publicação.
+São verificados o cache no Redis (MISS, HIT, invalidação após venda, TTL e limpeza, com `fakeredis`), cálculo da Function, descontos de 0% a 100%, venda com total zero, agregação da View, baixa de estoque pela Procedure, gravação da venda, rollback por falta de estoque, CRUD, validações diretamente no banco, atualização das restrições sem perda de dados, preservação de histórico, filtros e duas vendas concorrentes da última unidade. O workflow em `.github/workflows/testes.yml` executa os mesmos testes com PostgreSQL 17 no GitHub Actions após a publicação.
 
 ## Organização
 
 ```text
 src/
   app.py                   API e chamadas SQL reais
+  cache.py                 cache das leituras no Redis
   db.py                    conexão e transações
   config.py                variáveis de ambiente
   templates/index.html     estrutura das telas
@@ -175,11 +229,12 @@ database/
   functions/               fn_calcular_total_venda
   procedures/              sp_baixar_estoque
   inserts/                 dados de exemplo
+  supabase/                RLS e bloqueio da API pública do Supabase
   install.sql              instalação via psql
   demonstracao.sql          consultas para apresentação
 scripts/                   inicialização do banco e PostgreSQL portátil
 tests/                     testes de integração
-docs/                      modelo, requisitos, execução e vídeo de apresentação
+docs/                      modelo, requisitos, execução e vídeos
 ```
 
 ## Documentação e entrega

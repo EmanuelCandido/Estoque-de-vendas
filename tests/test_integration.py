@@ -8,12 +8,14 @@ from decimal import Decimal
 from pathlib import Path
 from threading import Barrier
 
+import fakeredis
 import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
 from src.app import create_app
+from src.cache import Cache
 from src.config import ROOT
 from scripts.setup_db import setup_database
 
@@ -40,7 +42,8 @@ class IntegrationTests(unittest.TestCase):
         cls.url = make_conninfo(cls.base_url, options=f"-csearch_path={cls.schema}")
         os.environ["DATABASE_URL"] = cls.url
         setup_database(seed=False)
-        cls.app = create_app()
+        # Sem Redis nos testes gerais: o setUp altera o banco direto, por fora da aplicação.
+        cls.app = create_app(cache=Cache())
         cls.client = cls.app.test_client()
 
     @classmethod
@@ -328,6 +331,32 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual([event["parametros"] for event in procedure_calls[:2]], list(reversed(self.items)))
         self.assertEqual([event["resultado"]["estoque_atual"] for event in procedure_calls[:2]], [4, 8])
         self.assertTrue(all(event["sql"] == "CALL sp_baixar_estoque(%s, %s)" for event in procedure_calls[:2]))
+
+    def test_redis_cache_hit_miss_and_invalidation_after_sale(self):
+        cache = Cache(ttl=60, client=fakeredis.FakeRedis(decode_responses=True))
+        client = create_app(cache=cache).test_client()
+        first, second = client.get("/api/produtos"), client.get("/api/produtos")
+        self.assertEqual((first.headers["X-Cache"], second.headers["X-Cache"]), ("MISS", "HIT"))
+        self.assertEqual(first.json, second.json)
+        # Uma mudança feita por fora da aplicação só aparece quando a chave expira ou é invalidada.
+        with self.connect() as conn:
+            conn.execute("UPDATE produtos SET estoque=estoque WHERE id=1")
+        self.assertEqual(client.get("/api/relatorio").headers["X-Cache"], "MISS")
+        self.assertEqual(client.get("/api/relatorio").json["resumo"]["vendas"], 0)
+        self.assertEqual(client.post("/api/vendas", json={"cliente_id": 1, "itens": self.items, "desconto": 10}).status_code, 201)
+        after_sale = client.get("/api/produtos")
+        self.assertEqual(after_sale.headers["X-Cache"], "MISS")
+        self.assertEqual([p["estoque"] for p in after_sale.json], [8, 4])
+        report = client.get("/api/relatorio")
+        self.assertEqual((report.headers["X-Cache"], report.json["resumo"]["vendas"]), ("MISS", 1))
+        self.assertEqual(client.get("/api/relatorio?inicio=2100-01-01").headers["X-Cache"], "MISS")
+        info = client.get("/api/integracoes").json
+        self.assertTrue(info["redis"]["conectado"])
+        self.assertEqual(info["redis"]["estatisticas"]["hits"], 2)
+        self.assertTrue(all(0 < key["ttl"] <= 60 for key in info["redis"]["chaves"]))
+        self.assertEqual(info["supabase"]["vendas"], 1)
+        self.assertEqual(client.post("/api/integracoes/limpar-cache").status_code, 200)
+        self.assertEqual(client.get("/api/integracoes").json["redis"]["chaves"], [])
 
     def test_two_concurrent_sales_cannot_sell_the_same_last_unit(self):
         with self.connect() as conn:

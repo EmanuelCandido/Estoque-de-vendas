@@ -1,4 +1,4 @@
-"""API Flask: o navegador chama o Python, que executa os recursos PostgreSQL."""
+"""API Flask: o navegador chama o Python, que lê e grava no Supabase (PostgreSQL) e usa o Redis como cache."""
 import json
 import os
 import re
@@ -6,12 +6,14 @@ from collections import deque
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from time import perf_counter
+from urllib.parse import urlsplit
 
 import psycopg
 from flask import Flask, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
-from src.config import ROOT
+from src.cache import Cache
+from src.config import ROOT, database_url
 from src.db import connection
 
 
@@ -27,13 +29,24 @@ def serializable(value):
     return value
 
 
-def create_app():
+def create_app(cache=None):
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
     events = deque(maxlen=20)
+    if cache is None:
+        cache = Cache(os.getenv("REDIS_URL"), int(os.getenv("CACHE_TTL", "60")))
 
     def response(data, status=200):
         return jsonify(serializable(data)), status
+
+    def cached(name, load):
+        # Leitura: tenta o Redis antes de consultar o Supabase.
+        started = perf_counter()
+        data, cache_status = cache.remember(name, lambda: serializable(load()))
+        result = jsonify(data)
+        result.headers["X-Cache"] = cache_status
+        result.headers["X-Tempo-Ms"] = str(round((perf_counter() - started) * 1000, 2))
+        return result
 
     def record(resource, screen, sql, parameters, result, started):
         events.appendleft({
@@ -135,13 +148,16 @@ def create_app():
     def status():
         with connection() as conn:
             info = conn.execute("SELECT version() AS versao, current_database() AS banco").fetchone()
-        return response({"status": "ok", **info})
+        host = urlsplit(database_url()).hostname or ""
+        return response({"status": "ok", "supabase": host.endswith(("supabase.co", "supabase.com")),
+                         "redis": cache.enabled, **info})
 
     @app.get("/api/clientes")
     def customers():
-        with connection() as conn:
-            rows = conn.execute("SELECT * FROM clientes ORDER BY ativo DESC, nome, id").fetchall()
-        return response(rows)
+        def load():
+            with connection() as conn:
+                return conn.execute("SELECT * FROM clientes ORDER BY ativo DESC, nome, id").fetchall()
+        return cached("clientes", load)
 
     @app.post("/api/clientes")
     @app.put("/api/clientes/<int:customer_id>")
@@ -166,6 +182,7 @@ def create_app():
                 ).fetchone()
         if row is None:
             return response({"erro": "Cliente não encontrado."}, 404)
+        cache.invalidate("clientes")
         return response(row, 201 if customer_id is None else 200)
 
     @app.delete("/api/clientes/<int:customer_id>")
@@ -174,13 +191,15 @@ def create_app():
             row = conn.execute("DELETE FROM clientes WHERE id=%s RETURNING id", (customer_id,)).fetchone()
         if row is None:
             return response({"erro": "Cliente não encontrado."}, 404)
+        cache.invalidate("clientes")
         return response({"mensagem": "Cliente excluído."})
 
     @app.get("/api/produtos")
     def products():
-        with connection() as conn:
-            rows = conn.execute("SELECT * FROM produtos ORDER BY ativo DESC, nome, id").fetchall()
-        return response(rows)
+        def load():
+            with connection() as conn:
+                return conn.execute("SELECT * FROM produtos ORDER BY ativo DESC, nome, id").fetchall()
+        return cached("produtos", load)
 
     @app.post("/api/produtos")
     @app.put("/api/produtos/<int:product_id>")
@@ -205,6 +224,7 @@ def create_app():
                 ).fetchone()
         if row is None:
             return response({"erro": "Produto não encontrado."}, 404)
+        cache.invalidate("produtos")
         return response(row, 201 if product_id is None else 200)
 
     @app.delete("/api/produtos/<int:product_id>")
@@ -213,6 +233,7 @@ def create_app():
             row = conn.execute("DELETE FROM produtos WHERE id=%s RETURNING id", (product_id,)).fetchone()
         if row is None:
             return response({"erro": "Produto não encontrado."}, 404)
+        cache.invalidate("produtos")
         return response({"mensagem": "Produto excluído."})
 
     @app.post("/api/orcamento")
@@ -279,6 +300,8 @@ def create_app():
             record("Procedure", "Nova venda", sql,
                    {"produto_id": item["produto_id"], "quantidade": item["quantidade"]},
                    {"venda_id": sale_id, "estoque_atual": item["estoque"]}, started)
+        # A venda mudou o estoque e o relatório: o cache antigo não vale mais.
+        cache.invalidate("produtos", "relatorio")
         return response(result, 201)
 
     @app.get("/api/vendas/<int:sale_id>")
@@ -307,18 +330,23 @@ def create_app():
             raise ValueError("A data inicial não pode ser maior que a final.")
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         sql = "SELECT * FROM vw_relatorio_vendas" + where + " ORDER BY data_venda DESC, venda_id DESC"
-        started = perf_counter()
-        with connection() as conn:
-            # View: retorna as vendas com subtotais, descontos e totais para o relatório.
-            rows = conn.execute(sql, parameters).fetchall()
-        summary = {
-            "vendas": len(rows),
-            "faturamento": sum((row["valor_total"] for row in rows), Decimal(0)),
-            "descontos": sum((row["valor_desconto"] for row in rows), Decimal(0)),
-            "unidades": sum(row["unidades"] for row in rows),
-        }
-        record("View", "Relatório de vendas", sql, parameters, {"linhas": len(rows), **summary}, started)
-        return response({"vendas": rows, "resumo": summary})
+
+        def load():
+            started = perf_counter()
+            with connection() as conn:
+                # View: retorna as vendas com subtotais, descontos e totais para o relatório.
+                rows = conn.execute(sql, parameters).fetchall()
+            summary = {
+                "vendas": len(rows),
+                "faturamento": sum((row["valor_total"] for row in rows), Decimal(0)),
+                "descontos": sum((row["valor_desconto"] for row in rows), Decimal(0)),
+                "unidades": sum(row["unidades"] for row in rows),
+            }
+            record("View", "Relatório de vendas", sql, parameters, {"linhas": len(rows), **summary}, started)
+            return {"vendas": rows, "resumo": summary}
+        # Cada filtro de data tem a sua chave no Redis.
+        key = "relatorio:{}:{}".format(request.args.get("inicio") or "-", request.args.get("fim") or "-")
+        return cached(key, load)
 
     @app.get("/api/recursos")
     def resources():
@@ -331,6 +359,28 @@ def create_app():
             "scripts": {key: (ROOT / "database" / path).read_text(encoding="utf-8") for key, path in files.items()},
             "eventos": list(events),
         })
+
+    @app.get("/api/integracoes")
+    def integrations():
+        host = urlsplit(database_url()).hostname or ""
+        started = perf_counter()
+        with connection() as conn:
+            info = conn.execute(
+                "SELECT version() AS versao, current_database() AS banco, current_user AS usuario, "
+                "(SELECT count(*) FROM produtos) AS produtos, (SELECT count(*) FROM clientes) AS clientes, "
+                "(SELECT count(*) FROM vendas) AS vendas"
+            ).fetchone()
+        latency = round((perf_counter() - started) * 1000, 2)
+        return response({
+            "supabase": {"ativo": host.endswith(("supabase.co", "supabase.com")), "host": host,
+                         "latencia_ms": latency, **info},
+            "redis": cache.info(),
+        })
+
+    @app.post("/api/integracoes/limpar-cache")
+    def clear_cache():
+        cache.clear()
+        return response({"mensagem": "Cache do Redis limpo."})
 
     # A demonstração foi projetada para uso local; bloqueia escritas de outra origem.
     @app.before_request

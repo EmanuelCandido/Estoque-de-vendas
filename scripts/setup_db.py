@@ -15,6 +15,7 @@ SCRIPTS = [
     "functions/01_calcular_total_venda.sql",
     "procedures/01_baixar_estoque.sql",
     "views/01_relatorio_vendas.sql",
+    "supabase/01_seguranca.sql",
 ]
 
 

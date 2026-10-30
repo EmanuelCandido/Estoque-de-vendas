@@ -2,12 +2,12 @@
 const $ = (selector) => document.querySelector(selector);
 const app = $("#app");
 const modal = $("#modal");
-const names = {inicio:"Visão geral",produtos:"Produtos",clientes:"Clientes",orcamento:"Orçamento",venda:"Nova venda",relatorio:"Relatório de vendas",banco:"Banco de dados"};
+const names = {inicio:"Visão geral",produtos:"Produtos",clientes:"Clientes",orcamento:"Orçamento",venda:"Nova venda",relatorio:"Relatório de vendas",banco:"Banco de dados",integracoes:"Supabase e Redis"};
 const state = {
   page: "inicio", products: [], customers: [], report: {vendas:[],resumo:{}}, filteredReport: null,
   carts: {orcamento:[],venda:[]}, discounts: {orcamento:"10",venda:"0"}, totals: {orcamento:null,venda:null},
   customerId: "", selectedResource: "View", resources: null, pending: false, search: {produtos:"",clientes:""},
-  filters: {inicio:"",fim:""}, lastSale: null,
+  filters: {inicio:"",fim:""}, lastSale: null, integrations: null, cacheTest: [],
 };
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const icon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
@@ -90,6 +90,34 @@ function renderReport() {
   <form class="panel filter-panel filters" data-form="filter"><div class="field"><label for="report-start">Data inicial</label><input id="report-start" type="date" name="inicio" value="${esc(state.filters.inicio)}"></div><div class="field"><label for="report-end">Data final</label><input id="report-end" type="date" name="fim" value="${esc(state.filters.fim)}"></div><button class="button primary" type="submit">Filtrar período</button><button class="button" type="button" data-action="clear-filter">Limpar</button></form>
   <section class="panel"><div class="panel-heading"><h2>Vendas registradas</h2><span class="record-count">${s.vendas||0} resultados</span></div>${salesTable(report.vendas)}</section>`;
 }
+async function loadIntegrations() {
+  try{state.integrations=await api("/api/integracoes");if(state.page==="integracoes")renderIntegrations();}catch(e){toast(e.message,true);}
+}
+// Mede a mesma leitura duas vezes: a primeira vai ao Supabase (MISS), a segunda vem do Redis (HIT).
+async function testCache() {
+  state.cacheTest=[];await api("/api/integracoes/limpar-cache","POST");
+  for(const tentativa of [1,2]){
+    const started=performance.now(); const result=await fetch("/api/relatorio");await result.json();
+    state.cacheTest.push({tentativa,cache:result.headers.get("X-Cache"),servidor:result.headers.get("X-Tempo-Ms"),total:(performance.now()-started).toFixed(1)});
+  }
+  await loadIntegrations();
+}
+function renderIntegrations() {
+  const data=state.integrations, sb=data?.supabase, rd=data?.redis;
+  const line=(label,value)=>`<div class="summary-line"><span>${label}</span><strong>${esc(value)}</strong></div>`;
+  const stats=rd?.estatisticas||{}, reads=(stats.hits||0)+(stats.misses||0);
+  app.innerHTML=heading("Supabase e Redis","Onde os dados ficam guardados e como o cache acelera as leituras.",`<div class="button-row"><button class="button" data-action="refresh-integrations">Atualizar</button><button class="button" data-action="clear-cache" ${rd?.conectado?"":"disabled"}>Limpar cache</button><button class="button primary" data-action="test-cache" ${rd?.conectado?"":"disabled"}>Testar cache</button></div>`)+
+  `<div class="integration-path"><span>Tela</span>${icon("arrow")}<span>Flask</span>${icon("arrow")}<span>Redis · tem a chave? (HIT)</span>${icon("arrow")}<span>Não tem: Supabase (MISS)</span>${icon("arrow")}<span>Grava no Redis com TTL</span></div>
+  <div class="integration-grid"><section class="panel summary-card"><h2>Supabase ${badge(sb?(sb.ativo?"conectado":"PostgreSQL local"):"carregando",sb?.ativo?"":"amber")}</h2>
+  ${sb?line("Servidor",sb.host)+line("Banco",sb.banco)+line("Usuário",sb.usuario)+line("Versão",String(sb.versao).split(" ").slice(0,2).join(" "))+line("Latência da consulta",`${sb.latencia_ms} ms`)+line("Produtos / clientes / vendas",`${sb.produtos} / ${sb.clientes} / ${sb.vendas}`):empty("Carregando…")}
+  <p class="summary-note">Tabelas, View, Function e Procedure ficam no PostgreSQL do Supabase. Toda escrita (cadastro e venda) vai direto para ele.</p></section>
+  <section class="panel summary-card"><h2>Redis ${badge(rd?(rd.conectado?"conectado":"desligado"):"carregando",rd?.conectado?"":"amber")}</h2>
+  ${rd?.conectado?line("Versão",rd.versao)+line("Latência (PING)",`${rd.latencia_ms} ms`)+line("Validade das chaves (TTL)",`${rd.ttl} s`)+line("Acertos (HIT)",stats.hits)+line("Faltas (MISS)",stats.misses)+line("Taxa de acerto",reads?`${Math.round(stats.hits*100/reads)}%`:"—")+line("Chaves invalidadas",stats.invalidacoes):`<p class="subtitle">${esc(rd?.motivo||"Carregando…")}</p>`}
+  <p class="summary-note">Guarda por pouco tempo as leituras repetidas (produtos, clientes e relatório). Uma venda ou cadastro apaga as chaves afetadas.</p></section></div>
+  ${state.cacheTest.length?`<section class="panel"><div class="panel-heading"><h2>Teste do cache: mesma consulta duas vezes</h2></div><div class="table-wrap"><table><thead><tr><th>Tentativa</th><th>Origem</th><th class="amount">Tempo no servidor</th><th class="amount">Tempo total</th></tr></thead><tbody>${state.cacheTest.map(t=>`<tr><td>${t.tentativa}ª</td><td>${badge(t.cache,t.cache==="HIT"?"":"amber")} ${t.cache==="HIT"?"Redis":"Supabase"}</td><td class="amount">${esc(t.servidor)} ms</td><td class="amount">${esc(t.total)} ms</td></tr>`).join("")}</tbody></table></div></section>`:""}
+  <div class="integration-grid"><section class="panel"><div class="panel-heading"><h2>Chaves no Redis agora</h2><span class="record-count">${rd?.chaves?.length||0} chaves</span></div>${rd?.chaves?.length?`<div class="table-wrap"><table><thead><tr><th>Chave</th><th class="amount">Expira em</th></tr></thead><tbody>${rd.chaves.map(k=>`<tr><td><code>${esc(k.chave)}</code></td><td class="amount">${k.ttl} s</td></tr>`).join("")}</tbody></table></div>`:empty("Nenhuma chave em cache. Abra uma tela para criar.")}</section>
+  <section class="panel"><div class="panel-heading"><h2>Comandos executados no Redis</h2></div>${rd?.eventos?.length?`<div class="table-wrap"><table><thead><tr><th>Horário</th><th>Comando</th><th>Chave</th><th>Resultado</th></tr></thead><tbody>${rd.eventos.slice(0,10).map(e=>`<tr><td class="nowrap">${hour(e.horario)}</td><td><code>${e.comando}</code></td><td><code>${esc(e.chave)}</code></td><td>${esc(e.resultado)}</td></tr>`).join("")}</tbody></table></div>`:empty("Nenhum comando nesta sessão.")}</section></div>`;
+}
 const resourceInfo = {
   View:{name:"vw_relatorio_vendas",text:"Consolida vendas, clientes e itens em uma linha por venda.",screen:"Relatório de vendas",path:"/api/relatorio"},
   Function:{name:"fn_calcular_total_venda",text:"Recebe o subtotal e o desconto. Retorna o valor final da compra.",screen:"Orçamento",path:"/api/orcamento"},
@@ -110,12 +138,13 @@ function renderBank() {
 function render() {
   document.querySelectorAll("[data-nav]").forEach(link=>{link.classList.toggle("active",link.dataset.nav===state.page);link.setAttribute("aria-current",link.dataset.nav===state.page?"page":"false");});
   $("#breadcrumb").textContent=names[state.page]; document.title=`${names[state.page]} · Projeto de Banco de Dados`;
-  const renders={inicio:renderHome,produtos:renderProducts,clientes:renderCustomers,orcamento:()=>renderCart("orcamento"),venda:()=>renderCart("venda"),relatorio:renderReport,banco:renderBank};
+  const renders={inicio:renderHome,produtos:renderProducts,clientes:renderCustomers,orcamento:()=>renderCart("orcamento"),venda:()=>renderCart("venda"),relatorio:renderReport,banco:renderBank,integracoes:renderIntegrations};
   renders[state.page]();
 }
 function navigate() {
   const requested=location.hash.slice(1);state.page=names[requested]?requested:"inicio";render();
   if(state.page==="banco")loadResources();
+  if(state.page==="integracoes")loadIntegrations();
 }
 function openModal(content) { $("#modal-content").innerHTML=content; if(!modal.open)modal.showModal(); }
 function modalHeader(title) {return `<div class="modal-header"><h2>${title}</h2><button class="icon-button" data-action="close-modal" aria-label="Fechar">×</button></div>`;}
@@ -169,6 +198,9 @@ document.addEventListener("click",event=>{
     else if(action==="confirm-delete"){
       await api(`/api/${type==="product"?"produtos":"clientes"}/${id}`,"DELETE");await refresh();state.totals={orcamento:null,venda:null};modal.close();render();toast("Cadastro excluído.");
     } else if(action==="refresh-resources")await loadResources();
+    else if(action==="refresh-integrations")await loadIntegrations();
+    else if(action==="test-cache"){await testCache();toast("Teste concluído: compare a origem e o tempo das duas consultas.");}
+    else if(action==="clear-cache"){await api("/api/integracoes/limpar-cache","POST");state.cacheTest=[];await loadIntegrations();toast("Cache do Redis limpo.");}
     else if(action==="refresh-report"||action==="clear-filter"){
       if(action==="clear-filter")state.filters={inicio:"",fim:""};
       const params=new URLSearchParams(state.filters);state.filteredReport=await api(`/api/relatorio?${params}`);renderReport();
@@ -211,7 +243,7 @@ document.addEventListener("change",event=>{
 window.addEventListener("hashchange",navigate);
 async function initialize() {
   try{
-    await api("/api/status");$("#connection-dot").classList.add("connected");$("#connection-label").textContent="Banco conectado";
+    const status=await api("/api/status");$("#connection-dot").classList.add("connected");$("#connection-label").textContent=`${status.supabase?"Supabase":"PostgreSQL"} conectado · Redis ${status.redis?"ativo":"desligado"}`;
     await refresh();navigate();
   }catch(e){$("#connection-dot").classList.add("offline");$("#connection-label").textContent="Banco indisponível";app.innerHTML=`<div class="error-banner">${esc(e.message)}<p class="subtitle">Inicie o projeto pelo arquivo iniciar.bat ou confira DATABASE_URL.</p></div>`;}
 }

@@ -78,9 +78,13 @@ if __name__ == "__main__":
     if "--parar" in sys.argv:
         stop()
     else:
-        dsn = prepare()
-        os.environ["DATABASE_URL"] = dsn
         sys.path.insert(0, str(ROOT))
+        import src.config  # carrega o .env
+        if os.getenv("DATABASE_URL"):
+            # Com DATABASE_URL no .env (Supabase), o PostgreSQL portátil não é usado.
+            print("Usando o banco configurado em DATABASE_URL (Supabase).", flush=True)
+        else:
+            os.environ["DATABASE_URL"] = prepare()
         from scripts.setup_db import setup_database
         setup_database()
         if "--somente-banco" not in sys.argv:
